@@ -1,12 +1,13 @@
+from __future__ import division
 from OpenGL import GLUT, GLU, GL
-from OpenGL.GL import glClearColor, glShadeModel
-from OpenGL.GL import glEnable, glLightfv, glEnd, glEndList, glPushMatrix, glTranslatef, glColor3f
-from OpenGL.GL import glPopMatrix, glClear, glLoadIdentity,glDisable,glLightModelfv,glViewport,glBegin
+from OpenGL.GL import glClearColor
+from OpenGL.GL import glEnable,  glEnd, glEndList, glPushMatrix, glTranslatef, glColor3f
+from OpenGL.GL import glPopMatrix, glClear, glLoadIdentity,glDisable,glViewport,glBegin
 from OpenGL.GL import glTexCoord2f,glVertex3f,glFrustum,glMatrixMode,glNewList,glGenLists,glScalef
 from OpenGL.GL import glFlush,glBindTexture,glTexImage2D,glTexParameterf,glCallList,glRotate
 from PIL import Image
-import sys, pygame,time
-from math import sin
+import sys, pygame,time,random, os
+from math import sin, sqrt
 
 cardList = None
 
@@ -53,69 +54,127 @@ def imageCard(filename):
 
     glCallList(cardList)
 
+class Scene(object):
+    """wall, photo cards
 
-def draw():
-    t1 = time.time()
-    glClearColor(0.0, 0.0, 0.0, 0.0)
-    glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
-    glLoadIdentity ()
-    GLU.gluLookAt (0.0, 0.7, 8.0,
-                   0.0, 0.5, 0.0,
-                   0.0, 1.0, 0.0)
-    
-    glRotate(sin(t1 * .7) * 40,0,1,0)
-    
-    glEnable(GL.GL_TEXTURE_2D)
-    matching = False
-    glPushMatrix()
-    if 1:
-        
-        glDisable(GL.GL_LIGHTING)
+    camera position is constant, although the camera can look left/right
+    """
+    def __init__(self):
+        self._wallX = -3 # left origin of wall
+        self.lookX = 0 # camera look-at
 
-        for x in range(10):
-            for y in range(3):
-                glPushMatrix()
-                if (x,y)==(1,1):
-                    glTranslatef(0,0,.2)
-                    glScalef(1.3, 1.3, 1)
-                glTranslatef(-3 + x * 2.2, y * 2.2 - .6, 0)
-                imageCard("sample.jpg")
-                glPopMatrix()
+    def wallX():
+        def fset(self, x):
+            self._wallX = min(3, max(-7*2.2, x))
+        def fget(self):
+            return self._wallX
+        return locals()
+    wallX = property(**wallX())
 
-        glEnable(GL.GL_LIGHTING)
+    def draw(self):
+        t1 = time.time()
+        glClearColor(0.0, 0.0, 0.0, 0.0)
+        glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+        glLoadIdentity ()
+        GLU.gluLookAt (0.0, 0.7, 8.0,
+                       self.lookX, 0.5, 0.0,
+                       0.0, 1.0, 0.0)
 
-    glPopMatrix()
-    
-    glFlush()
-    pygame.display.flip()
-    #print "draw", time.time() - t1
+        #glRotate(self.rotY, 0, 1, 0)
+
+        glEnable(GL.GL_TEXTURE_2D)
+        glPushMatrix()
+        if 1:
+            glDisable(GL.GL_LIGHTING)
+
+            #root = "/home/drewp/pic/digicam/dl-2008-04-19"
+            root = "specnature-thumbs"
+            pics = [os.path.join(root, f)
+                    for f in os.listdir(root) if f.lower().endswith('.jpg')]
+
+
+            for x in range(7):
+                for y in range(3):
+                    glPushMatrix()
+                    if (x,y)==(1,1):
+                        glTranslatef(0,0,.05)
+                        glScalef(1.3, 1.3, 1)
+                    glTranslatef(self.wallX + x * 2.2,
+                                 y * 2.2 - .6,
+                                 0)
+                    imageCard(pics[(x * 3 + y) % len(pics)])
+                    glPopMatrix()
+
+            glEnable(GL.GL_LIGHTING)
+
+        glPopMatrix()
+
+        glFlush()
+        pygame.display.flip()
+        #print "draw", time.time() - t1
 
 pygame.init()
 
-surf = pygame.display.set_mode((1200, 600),
+surf = pygame.display.set_mode((800, 600),
                                pygame.OPENGL |
                                #pygame.FULLSCREEN | 
                                pygame.DOUBLEBUF |
                                0)
-
+scene = Scene()
 openglSetup()
 
-def loop():
-    while 1:
-        try:
-            event=pygame.event.poll ()
+def dist(p1, p2):
+    return sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
 
-            if event.type is pygame.QUIT:
-              sys.exit(0)
+class MainLoop(object):
+    def __init__(self):
+        self.buttons = None
+        self.dx = 0 # "joystick" x pos
+        self.rot = 0 # rotation due to move
+        self.decel = 1 # 1..0 during decelleration
+        while 1:
+            try:
+                self.update()
+            except KeyboardInterrupt:
+                break
+            
+    def update(self):
+        event=pygame.event.poll ()
 
-            draw()
+        if event.type is pygame.QUIT:
+          sys.exit(0)
 
-            if event.type is pygame.KEYDOWN:
-              if event.key is pygame.K_ESCAPE:
-                sys.exit(0)
-              if event.key is pygame.K_1:
-                direction2=2
-        except KeyboardInterrupt:
-            break
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:
+                self.buttons = 1
+                self.buttonStartX = event.pos[0]
+                self.dx = 0
+                self.rot = 0
+                self.clickPos = event.pos
+                
+        if event.type == pygame.MOUSEMOTION and self.buttons == 1:
+            self.dx = event.pos[0] - self.buttonStartX
+            self.rot = -self.dx / 50
+            self.decel = min(1, self.decel + .05)
 
-loop()
+        if event.type == pygame.MOUSEBUTTONUP:
+            self.buttons = None
+            if dist(event.pos, self.clickPos) < 5:
+                print "clicked", event.pos
+
+        if self.buttons is None and self.decel > 0:
+            self.decel = max(0, self.decel - .02)
+
+        scene.wallX += self.dx / 1000 * self.decel
+        scene.lookX = self.rot * (self.decel ** 1.2)
+
+            
+        if event.type is pygame.KEYDOWN:
+          if event.key is pygame.K_ESCAPE:
+            sys.exit(0)
+          if event.key is pygame.K_1:
+            direction2=2
+            
+        scene.draw()
+
+MainLoop()
