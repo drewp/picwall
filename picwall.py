@@ -21,16 +21,26 @@ class AnimParam:
 
 class Pt(object):
     """coordinate that smoothly changes, using various speed curves"""
+
+    allPts = []
+
+    @staticmethod
+    def stepAll(dt):
+        for p in Pt.allPts:
+            p.step(dt)
     
     def __init__(self, x):
+        self.allPts.append(self)
         self.x = x
         self.goal = x
+        self.expSecs = 0
         
     def goto(self, x, secs=None, expSecs=None):
         self.goal = x
+        self.expSecs = expSecs
 
     def step(self, dt):
-        self.x += (self.goal - self.x) * dt
+        self.x += (self.goal - self.x) * dt * self.expSecs
 
 
 class AllCards(object):
@@ -39,7 +49,6 @@ class AllCards(object):
     the current zoom/hover
     """
     def __init__(self):
-
         self.cards = []
         self.currentZoom = None
         self.currentRaise = None
@@ -56,6 +65,10 @@ class AllCards(object):
                                        (x * 2.2 + .5,
                                         y * 2.2 - .6 + .5,
                                         0)))
+
+    def wallWidth(self):
+        return 12 * 2.2
+
     def cardAtPoint(self, pos):
         wx, wy, _ = pos
         for card in self.cards:
@@ -66,11 +79,11 @@ class AllCards(object):
 
     def raiseAtPoint(self, pos):
         if self.currentRaise is not None and not self.currentRaise.zoom:
-            self.currentRaise.goalZ = 0
+            self.currentRaise.z.goto(0, expSecs=1 / AnimParam.cardZSlide)
         try:
             card = self.cardAtPoint(pos)
             if not card.zoom:
-                card.goalZ = .6
+                card.z.goto(.6, expSecs=1 / AnimParam.cardZSlide)
             self.currentRaise = card
         except ValueError:
             self.currentRaise = None
@@ -100,19 +113,19 @@ class ImageCard(object):
         (when it isn't zoomed)"""
         self.center = center
         self.thumbImage = thumbImage
-        self.goalZ = 0
-        self.z = 0
+        self.z = Pt(0)
+        
         self.zoom = 0 # if 1, the card should fill the frame
 
-    def step(self, dt):
-        self.z += (self.goalZ - self.z) * dt / AnimParam.cardZSlide
+#    def step(self, dt):
+#        self.z += (self.goalZ - self.z) * dt / AnimParam.cardZSlide
 
     def draw(self, eyeX, horizonY, cardList):
         """draw the card in place, using small/large image data as needed """
 
         with pushMatrix():
             pos = num.array(self.center)
-            pos[2] += self.z
+            pos[2] += self.z.x
             if self.zoom:
                 full = [eyeX, horizonY, 6.3]
                 pos = lerp(pos, full, self.zoom)
@@ -161,8 +174,14 @@ class Scene(object):
     def __init__(self, surf, cards):
         self.surf = surf
         self.cards = cards
-        self.eyeX = 0 # camera location
-        self.lookX = 0 # camera look-at
+        
+        self.eyeX = Pt(0) # camera location
+        self.eyeX.expSecs = AnimParam.eyeCatchUp
+        
+        self.lookX = Pt(0) # camera look-at
+        # look has to be faster than eyeX, to make the camera look
+        # ahead of where it is.
+        self.lookX.expSecs = AnimParam.eyeCatchUp * 3
         
         self.ball = [0,0,0] # a reference pos for debugging
 
@@ -193,9 +212,9 @@ class Scene(object):
         glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
         glLoadIdentity ()
         horizonY = 1 * 2.2 - .6 + .5
-        GLU.gluLookAt (self.eyeX, horizonY, 8.0,
-                       self.lookX, horizonY, 0.0,
-                       0.0, 1.0, 0.0)
+        GLU.gluLookAt(self.eyeX.x, horizonY, 8.0,
+                      self.lookX.x, horizonY, 0.0,
+                      0.0, 1.0, 0.0)
 
         glEnable(GL.GL_TEXTURE_2D)
 
@@ -209,14 +228,11 @@ class Scene(object):
         with pushMatrix():
             with mode(disable=[GL.GL_LIGHTING]):
                 for card in self.cards:
-                    card.draw(self.eyeX, horizonY, self.cardList)
+                    card.draw(self.eyeX.x, horizonY, self.cardList)
 
         glFlush()
         pygame.display.flip()
         #print "draw", time.time() - t1
-
-    def wallWidth(self):
-        return 12 * 2.2
 
 class MainLoop(object):
     """
@@ -226,7 +242,9 @@ class MainLoop(object):
         self.cards, self.scene = cards, scene
         self.buttons = None
         self.dx = 0 # "joystick" x pos
-        self.goalX = 0 # wall center goal
+
+        self.goalX = Pt(0) # wall center goal
+
         self.decel = 1 # 1..0 during decelleration
         self.lastUpdate = time.time()
 
@@ -247,26 +265,26 @@ class MainLoop(object):
         reactor.callLater(0, self.update)
 
     def step(self, dt):
+        """advance all animation by one time step. dt should be the
+        seconds since the last step call"""
+        scene = self.scene
+
         if self.buttons is None and self.decel > 0:
             self.decel = max(0, self.decel - dt / AnimParam.rampDown)
 
-        self.goalX += self.dx * AnimParam.goalXSpeed * dt * self.decel
-        self.goalX = max(0, min(self.scene.wallWidth(), self.goalX))
-        #scene.ball = [self.goalX, -.1, .1]
+        self.goalX.x += self.dx * AnimParam.goalXSpeed * dt * self.decel
+        self.goalX.x = max(0, min(self.cards.wallWidth(), self.goalX.x))
 
-        scene = self.scene
-        
-        # look can't be too fast, since I jump the goalX when you click an image
-        scene.lookX += (self.goalX - scene.lookX) * dt * AnimParam.eyeCatchUp * 3
+        scene.lookX.goal = self.goalX.x
+        scene.eyeX.goal = self.goalX.x
+        #scene.ball = [self.goalX.x, -.1, .1]
 
-        scene.eyeX += (self.goalX - scene.eyeX) * dt * AnimParam.eyeCatchUp
+        Pt.stepAll(dt)
 
         #sys.stdout.write("goal %s, eye %s, dx %s, decel %s        \r" %
-        #                 (self.goalX, scene.eyeX, self.dx, self.decel))
+        #                 (self.goalX.x, scene.eyeX, self.dx, self.decel))
         #sys.stdout.flush()
 
-        for card in self.cards:
-            card.step(dt)
 
     def onEvent(self, event, dt):
         if event.type is pygame.QUIT:
@@ -297,7 +315,7 @@ class MainLoop(object):
             print "up"
             if dist(event.pos, self.clickPos) < 5:
                 def goto(x):
-                    self.goalX = x
+                    self.goalX.x = x
                 self.cards.zoomAtPoint(self.cursorPosition(event.pos), goto)
                 
 
