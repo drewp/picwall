@@ -1,17 +1,23 @@
 from __future__ import division, with_statement
 import Numeric as num
-from OpenGL import GLUT, GLU, GL
-from OpenGL.GL import glClearColor
-from OpenGL.GL import glEnable,  glEnd, glEndList, glPushMatrix, glTranslatef, glColor3f
-from OpenGL.GL import glPopMatrix, glClear, glLoadIdentity,glDisable,glViewport,glBegin
-from OpenGL.GL import glTexCoord2f,glVertex3f,glFrustum,glMatrixMode,glNewList,glGenLists,glScalef
-from OpenGL.GL import glFlush,glBindTexture,glTexImage2D,glTexParameterf,glCallList
-from PIL import Image
-import sys, pygame,time, os
-from math import sqrt
+from OpenGL import GLU, GL
+from OpenGL.GL import glClearColor,glNewList,glGenLists,glScalef
+from OpenGL.GL import glEnable, glEndList, glTranslatef, glColor3f
+from OpenGL.GL import glClear, glLoadIdentity, glViewport,glCallList
+from OpenGL.GL import glTexCoord2f,glVertex3f,glFrustum,glMatrixMode
+from OpenGL.GL import glFlush,glBindTexture,glTexImage2D,glTexParameterf
+import pygame, time
 from twisted.internet import reactor
 import picrss
 from glsyntax import pushMatrix, mode, begin
+from algo import dist, lerp
+
+class AnimParam:
+    cardZSlide = .1 # sec, roughly
+    goalXSpeed = 7 / 50 # units / sec per pixel
+    eyeCatchUp = 3 # du / sec. lower = more tilting
+    rampUp = .5 # sec to get to full speed
+    rampDown = .3 # sec to stop
 
 class Pt(object):
     """coordinate that smoothly changes, using various speed curves"""
@@ -26,39 +32,6 @@ class Pt(object):
     def step(self, dt):
         self.x += (self.goal - self.x) * dt
 
-def dist(p1, p2):
-    return sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
-
-def lerp(p1, p2, t):
-    return num.array(p1) * (1 - t) + num.array(p2) * t
-
-cardList = None
-
-def openglSetup():
-    global cardList
-    GLUT.glutInit(sys.argv)
-
-    glClearColor (0.0, 0.0, 0.0, 0.0)
-    glEnable(GL.GL_DEPTH_TEST) 
-    glEnable(GL.GL_COLOR_MATERIAL)
-
-    glViewport (0, 0, surf.get_width(), surf.get_height())
-    glMatrixMode (GL.GL_PROJECTION)
-    glLoadIdentity ()
-    glFrustum (-1.0, 1.0, -1.0, 1.0, 1.5, 20.0)
-    glMatrixMode (GL.GL_MODELVIEW)
-
-    cardList = glGenLists(1)
-    glNewList(cardList, GL.GL_COMPILE)
-    glColor3f(1,1,1)
-    with begin(GL.GL_QUADS):
-        glTexCoord2f(0.0, 1.0); glVertex3f(-1.0, -1.0,  0.0)
-        glTexCoord2f(1.0, 1.0); glVertex3f( 1.0, -1.0,  0.0)
-        glTexCoord2f(1.0, 0.0); glVertex3f( 1.0, 1.0,  0.0)
-        glTexCoord2f(0.0, 0.0); glVertex3f(-1.0, 1.0,  0.0)
-    glEndList()
-
-cardZSlide = .1 # sec, roughly
 
 class AllCards(object):
     """
@@ -123,6 +96,8 @@ class AllCards(object):
 class ImageCard(object):
     """the visible card object"""
     def __init__(self, thumbImage, center):
+        """center is the 3d position of the normal center of this card
+        (when it isn't zoomed)"""
         self.center = center
         self.thumbImage = thumbImage
         self.goalZ = 0
@@ -130,9 +105,9 @@ class ImageCard(object):
         self.zoom = 0 # if 1, the card should fill the frame
 
     def step(self, dt):
-        self.z += (self.goalZ - self.z) * dt / cardZSlide
+        self.z += (self.goalZ - self.z) * dt / AnimParam.cardZSlide
 
-    def draw(self, eyeX, horizonY):
+    def draw(self, eyeX, horizonY, cardList):
         """draw the card in place, using small/large image data as needed """
 
         with pushMatrix():
@@ -178,17 +153,39 @@ class ImageCard(object):
         return "Card(%r, %r)" % (self.thumbImage, self.center)
 
 
-cards = AllCards()
-
 class Scene(object):
-    """wall, photo cards
+    """Rendering of wall and photo cards. No animation code in here.
 
     wall is static; camera moves
     """
-    def __init__(self):
+    def __init__(self, surf, cards):
+        self.surf = surf
+        self.cards = cards
         self.eyeX = 0 # camera location
         self.lookX = 0 # camera look-at
-        self.ball = [0,0,0] # reference pos
+        
+        self.ball = [0,0,0] # a reference pos for debugging
+
+    def openglSetup(self):
+        glClearColor(0.0, 0.0, 0.0, 0.0)
+        glEnable(GL.GL_DEPTH_TEST) 
+        glEnable(GL.GL_COLOR_MATERIAL)
+
+        glViewport (0, 0, self.surf.get_width(), self.surf.get_height())
+        glMatrixMode (GL.GL_PROJECTION)
+        glLoadIdentity ()
+        glFrustum (-1.0, 1.0, -1.0, 1.0, 1.5, 20.0)
+        glMatrixMode (GL.GL_MODELVIEW)
+
+        self.cardList = glGenLists(1)
+        glNewList(self.cardList, GL.GL_COMPILE)
+        glColor3f(1,1,1)
+        with begin(GL.GL_QUADS):
+            glTexCoord2f(0.0, 1.0); glVertex3f(-1.0, -1.0,  0.0)
+            glTexCoord2f(1.0, 1.0); glVertex3f( 1.0, -1.0,  0.0)
+            glTexCoord2f(1.0, 0.0); glVertex3f( 1.0, 1.0,  0.0)
+            glTexCoord2f(0.0, 0.0); glVertex3f(-1.0, 1.0,  0.0)
+        glEndList()
  
     def draw(self):
         t1 = time.time()
@@ -211,8 +208,8 @@ class Scene(object):
 
         with pushMatrix():
             with mode(disable=[GL.GL_LIGHTING]):
-                for card in cards:
-                    card.draw(self.eyeX, horizonY)
+                for card in self.cards:
+                    card.draw(self.eyeX, horizonY, self.cardList)
 
         glFlush()
         pygame.display.flip()
@@ -221,23 +218,12 @@ class Scene(object):
     def wallWidth(self):
         return 12 * 2.2
 
-pygame.init()
-
-surf = pygame.display.set_mode((800, 600),
-                               pygame.OPENGL |
-                               #pygame.FULLSCREEN | 
-                               pygame.DOUBLEBUF |
-                               0)
-scene = Scene()
-openglSetup()
-
-goalXSpeed = 7 / 50 # units / sec per pixel
-eyeCatchUp = 3 # du / sec. lower = more tilting
-rampUp = .5 # sec to get to full speed
-rampDown = .3 # sec to stop
-
 class MainLoop(object):
-    def __init__(self):
+    """
+    animation control, user input
+    """
+    def __init__(self, cards, scene):
+        self.cards, self.scene = cards, scene
         self.buttons = None
         self.dx = 0 # "joystick" x pos
         self.goalX = 0 # wall center goal
@@ -257,27 +243,29 @@ class MainLoop(object):
                 break
             self.onEvent(event, dt)
         self.step(dt)
-        scene.draw()
+        self.scene.draw()
         reactor.callLater(0, self.update)
 
     def step(self, dt):
         if self.buttons is None and self.decel > 0:
-            self.decel = max(0, self.decel - dt / rampDown)
+            self.decel = max(0, self.decel - dt / AnimParam.rampDown)
 
-        self.goalX += self.dx * goalXSpeed * dt * self.decel
-        self.goalX = max(0, min(scene.wallWidth(), self.goalX))
+        self.goalX += self.dx * AnimParam.goalXSpeed * dt * self.decel
+        self.goalX = max(0, min(self.scene.wallWidth(), self.goalX))
         #scene.ball = [self.goalX, -.1, .1]
+
+        scene = self.scene
         
         # look can't be too fast, since I jump the goalX when you click an image
-        scene.lookX += (self.goalX - scene.lookX) * dt * eyeCatchUp * 3
+        scene.lookX += (self.goalX - scene.lookX) * dt * AnimParam.eyeCatchUp * 3
 
-        scene.eyeX += (self.goalX - scene.eyeX) * dt * eyeCatchUp
+        scene.eyeX += (self.goalX - scene.eyeX) * dt * AnimParam.eyeCatchUp
 
         #sys.stdout.write("goal %s, eye %s, dx %s, decel %s        \r" %
         #                 (self.goalX, scene.eyeX, self.dx, self.decel))
         #sys.stdout.flush()
 
-        for card in cards:
+        for card in self.cards:
             card.step(dt)
 
     def onEvent(self, event, dt):
@@ -297,12 +285,12 @@ class MainLoop(object):
         if event.type == pygame.MOUSEMOTION:
             if self.buttons == 1:
                 self.dx = event.pos[0] - self.clickPos[0]
-                self.decel = min(1, self.decel + dt / rampUp)
+                self.decel = min(1, self.decel + dt / AnimParam.rampUp)
 
-            cards.raiseAtPoint(self.cursorPosition(event.pos))
-            scene.ball[2] = .001
-            #scene.ball = [0,0,.01]
-            #print scene.ball
+            self.cards.raiseAtPoint(self.cursorPosition(event.pos))
+            self.scene.ball[2] = .001
+            #self.scene.ball = [0,0,.01]
+            #print self.scene.ball
 
         if event.type == pygame.MOUSEBUTTONUP:
             self.buttons = None
@@ -310,12 +298,12 @@ class MainLoop(object):
             if dist(event.pos, self.clickPos) < 5:
                 def goto(x):
                     self.goalX = x
-                cards.zoomAtPoint(self.cursorPosition(event.pos), goto)
+                self.cards.zoomAtPoint(self.cursorPosition(event.pos), goto)
                 
 
     def cursorPosition(self, eventPos):
         """cursor coordinates on z=0 plane for the given screen pixel coord"""
-        w, h = surf.get_size()
+        w, h = self.scene.surf.get_size()
         sx, sy = eventPos
         # something's messed up with my projections. there shouldn't
         # be any estimated 5.3 multiplier in here
@@ -324,5 +312,18 @@ class MainLoop(object):
                                      0)
         return [wx, wy, 0]
 
-ml = MainLoop()
-reactor.run()
+def main():
+    pygame.init()
+
+    surf = pygame.display.set_mode((800, 600),
+                                   pygame.OPENGL |
+                                   #pygame.FULLSCREEN | 
+                                   pygame.DOUBLEBUF |
+                                   0)
+    cards = AllCards()
+    scene = Scene(surf, cards)
+    scene.openglSetup()
+
+    ml = MainLoop(cards, scene)
+    reactor.run()
+main()
