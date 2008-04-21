@@ -133,22 +133,7 @@ class ImageCard(object):
         self.z += (self.goalZ - self.z) * dt / cardZSlide
 
     def draw(self, eyeX, horizonY):
-        """draw the card in place """
-
-        textureData = self.thumbImage.getData('thumb')
-        if textureData is None:
-            return
-
-        glBindTexture(GL.GL_TEXTURE_2D, 0)
-        glTexImage2D( GL.GL_TEXTURE_2D, 0, GL.GL_RGB,
-                      256, #multiImage.size()[0],
-                      256, #multiImage.size()[1],
-                      0,
-                      GL.GL_RGB, GL.GL_UNSIGNED_BYTE, textureData)
-        glTexParameterf(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER,
-                        GL.GL_LINEAR)
-        glTexParameterf(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER,
-                        GL.GL_LINEAR)
+        """draw the card in place, using small/large image data as needed """
 
         glPushMatrix()
         if 1:
@@ -159,9 +144,39 @@ class ImageCard(object):
                 pos = lerp(pos, full, self.zoom)
             glTranslatef(*pos)
 
-            # card facing +Z from -1<x<1 -1<y<1
-            glCallList(cardList)
+            layers = [('thumb', 1, self.thumbImage.getData('thumb'))]
+            if self.zoom:
+                data = self.thumbImage.getData('full')
+                if data is not None:
+                    layers.append(('full', 1, data))
+                    # once opacity is fadable, and it's at 1, then we
+                    # can remove the thumb layer from the list.
+
+            for size, opacity, textureData in layers:
+                if textureData is None:
+                    # need to unset tx here!
+                    glCallList(cardList)
+                    # or draw a blank border, maybe some load status
+                    # indication
+                else:
+                    glBindTexture(GL.GL_TEXTURE_2D, 0)
+                    glTexImage2D( GL.GL_TEXTURE_2D, 0, GL.GL_RGB,
+                                  256, #multiImage.size()[0],
+                                  256, #multiImage.size()[1],
+                                  0,
+                                  GL.GL_RGB, GL.GL_UNSIGNED_BYTE, textureData)
+                    glTexParameterf(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER,
+                                    GL.GL_LINEAR)
+                    glTexParameterf(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER,
+                                    GL.GL_LINEAR)
+
+                    # card facing +Z from -1<x<1 -1<y<1
+                    glCallList(cardList)
+                
         glPopMatrix()
+
+        # if it's a bottom-row image, draw the reflection here
+        
 
     def __repr__(self):
         return "Card(%r, %r)" % (self.thumbImage, self.center)

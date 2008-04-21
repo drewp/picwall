@@ -1,12 +1,25 @@
-from  RSS import CollectionChannel, ns as RSS_NS
+"""
+todo:
+ single file pool, to avoid redundant reads between items or between thumb/full
+
+ 
+"""
+from RSS import CollectionChannel
 from twisted.web.client import getPage
 from twisted.internet.defer import Deferred, succeed
-import os, re, sys
+from twisted.internet import reactor
+import os, re, sys, random
 from PIL import Image
 from StringIO import StringIO
 
-def RSS(name):
-    return (RSS_NS.rss10, name)
+def localLoad(url, delaySecs=0):
+    """deferred to file.read, with optional delay to simulate a load time"""
+    contents = open(url[len("file://"):]).read()
+    if not delaySecs:
+        return succeed(contents)
+    d = Deferred()
+    reactor.callLater(delaySecs, lambda: d.callback(contents))
+    return d
 
 class ThumbImage(object):
     """image data that loads first as a thumbnail, then if requested,
@@ -15,14 +28,20 @@ class ThumbImage(object):
         self.thumbUrl, self.fullUrl = thumbUrl, fullUrl
         self.data = {} # size : deferred or data
 
-    def getDeferred(self, size='thumb'):
+    def _getDeferred(self, size='thumb'):
         """returns deferred to the image data"""
         url = getattr(self, "%sUrl" % size)
+        print "fetching", size, url
         if url.startswith("file://"):
-            return succeed(open(url[len("file://"):]).read())
-        print "fetching", url
-        d = getPage(url)
-        d.addErrback(lambda e: [sys.stderr.write(str(e)), sys.stderr.flush()])
+            d = localLoad(url, delaySecs=2 * random.random())
+        else:
+            d = getPage(url)
+            d.addErrback(lambda e: [sys.stderr.write(str(e)),
+                                    sys.stderr.flush()])
+        @d.addCallback
+        def prn(r):
+            print "done", url
+            return r
         return d
 
     def getData(self, size='thumb'):
@@ -34,13 +53,13 @@ class ThumbImage(object):
             # to a different variable altogether
             return None
         if ret is None:
-            d = self.data[size] = self.getDeferred(size)
-            d.addCallback(self.decompress)
+            d = self.data[size] = self._getDeferred(size)
+            d.addCallback(self._decompress)
             d.addCallback(lambda data: self.data.__setitem__(size, data))
             return None
         return ret
 
-    def decompress(self, jpgData):
+    def _decompress(self, jpgData):
         """get the RGB data from the results of the URL.
 
         (to support multiple img types, this will probably have to
