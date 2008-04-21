@@ -1,4 +1,4 @@
-from __future__ import division
+from __future__ import division, with_statement
 import Numeric as num
 from OpenGL import GLUT, GLU, GL
 from OpenGL.GL import glClearColor
@@ -11,6 +11,7 @@ import sys, pygame,time, os
 from math import sqrt
 from twisted.internet import reactor
 import picrss
+from glsyntax import pushMatrix, mode, begin
 
 class Pt(object):
     """coordinate that smoothly changes, using various speed curves"""
@@ -50,12 +51,11 @@ def openglSetup():
     cardList = glGenLists(1)
     glNewList(cardList, GL.GL_COMPILE)
     glColor3f(1,1,1)
-    glBegin(GL.GL_QUADS)
-    glTexCoord2f(0.0, 1.0); glVertex3f(-1.0, -1.0,  0.0)
-    glTexCoord2f(1.0, 1.0); glVertex3f( 1.0, -1.0,  0.0)
-    glTexCoord2f(1.0, 0.0); glVertex3f( 1.0, 1.0,  0.0)
-    glTexCoord2f(0.0, 0.0); glVertex3f(-1.0, 1.0,  0.0)
-    glEnd()
+    with begin(GL.GL_QUADS):
+        glTexCoord2f(0.0, 1.0); glVertex3f(-1.0, -1.0,  0.0)
+        glTexCoord2f(1.0, 1.0); glVertex3f( 1.0, -1.0,  0.0)
+        glTexCoord2f(1.0, 0.0); glVertex3f( 1.0, 1.0,  0.0)
+        glTexCoord2f(0.0, 0.0); glVertex3f(-1.0, 1.0,  0.0)
     glEndList()
 
 cardZSlide = .1 # sec, roughly
@@ -135,8 +135,7 @@ class ImageCard(object):
     def draw(self, eyeX, horizonY):
         """draw the card in place, using small/large image data as needed """
 
-        glPushMatrix()
-        if 1:
+        with pushMatrix():
             pos = num.array(self.center)
             pos[2] += self.z
             if self.zoom:
@@ -172,11 +171,8 @@ class ImageCard(object):
 
                     # card facing +Z from -1<x<1 -1<y<1
                     glCallList(cardList)
-                
-        glPopMatrix()
 
         # if it's a bottom-row image, draw the reflection here
-        
 
     def __repr__(self):
         return "Card(%r, %r)" % (self.thumbImage, self.center)
@@ -207,24 +203,16 @@ class Scene(object):
         glEnable(GL.GL_TEXTURE_2D)
 
         if 0:
-            glPushMatrix()
-            glColor3f(1,0,0)
-            glTranslatef(*self.ball)
-            glScalef(.2, .2, 1)
-            imageCard("sample.jpg")
-            glPopMatrix()
+            with pushMatrix():
+                glColor3f(1,0,0)
+                glTranslatef(*self.ball)
+                glScalef(.2, .2, 1)
+                imageCard("sample.jpg")
 
-        glPushMatrix()
-        if 1:
-            glDisable(GL.GL_LIGHTING)
-
-            for card in cards:
-                card.draw(self.eyeX, horizonY)
-                
-
-            glEnable(GL.GL_LIGHTING)
-
-        glPopMatrix()
+        with pushMatrix():
+            with mode(disable=[GL.GL_LIGHTING]):
+                for card in cards:
+                    card.draw(self.eyeX, horizonY)
 
         glFlush()
         pygame.display.flip()
