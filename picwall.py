@@ -9,6 +9,8 @@ from OpenGL.GL import glFlush,glBindTexture,glTexImage2D,glTexParameterf,glCallL
 from PIL import Image
 import sys, pygame,time, os
 from math import sqrt
+from twisted.internet import reactor
+import picrss
 
 class Pt(object):
     """coordinate that smoothly changes, using various speed curves"""
@@ -26,6 +28,8 @@ class Pt(object):
 def dist(p1, p2):
     return sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
 
+def lerp(p1, p2, t):
+    return num.array(p1) * (1 - t) + num.array(p2) * t
 
 cardList = None
 
@@ -54,28 +58,13 @@ def openglSetup():
     glEnd()
     glEndList()
 
-_tex = {}
-def imageCard(filename):
-    """card facing +Z from -1<x<1 -1<y<1"""
-    if filename not in _tex:
-        img = Image.open(filename)
-        _tex[filename] = img.resize((256, 256)).tostring()
-    textureData = _tex[filename]
-
-    glBindTexture(GL.GL_TEXTURE_2D, 0)
-    glTexImage2D( GL.GL_TEXTURE_2D, 0, GL.GL_RGB,
-                  256, #multiImage.size()[0],
-                  256, #multiImage.size()[1],
-                  0,
-                  GL.GL_RGB, GL.GL_UNSIGNED_BYTE, textureData)
-    glTexParameterf(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
-    glTexParameterf(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
-
-    glCallList(cardList)
-
 cardZSlide = .1 # sec, roughly
 
 class AllCards(object):
+    """
+    holds the ImageCards objs you can currently see on the wall, plus
+    the current zoom/hover
+    """
     def __init__(self):
 
         self.cards = []
@@ -84,8 +73,9 @@ class AllCards(object):
 
         #root = "/home/drewp/pic/digicam/dl-2008-04-19"
         root = "specnature-thumbs"
-        pics = [os.path.join(root, f)
-                for f in os.listdir(root) if f.lower().endswith('.jpg')]
+#        pics = [os.path.join(root, f)
+#                for f in os.listdir(root) if f.lower().endswith('.jpg')]
+        pics = list(picrss.localDir(root))
 
         for x in range(12):
             for y in range(3):
@@ -131,9 +121,10 @@ class AllCards(object):
         return iter(self.cards)
 
 class ImageCard(object):
-    def __init__(self, filename, center):
+    """the visible card object"""
+    def __init__(self, thumbImage, center):
         self.center = center
-        self.filename = filename
+        self.thumbImage = thumbImage
         self.goalZ = 0
         self.z = 0
         self.zoom = 0 # if 1, the card should fill the frame
@@ -141,11 +132,40 @@ class ImageCard(object):
     def step(self, dt):
         self.z += (self.goalZ - self.z) * dt / cardZSlide
 
-    def __repr__(self):
-        return "Card(%r, %r)" % (self.filename, self.center)
+    def draw(self, eyeX, horizonY):
+        """draw the card in place """
 
-def lerp(p1, p2, t):
-    return num.array(p1) * (1 - t) + num.array(p2) * t
+        textureData = self.thumbImage.getData('thumb')
+        if textureData is None:
+            return
+
+        glBindTexture(GL.GL_TEXTURE_2D, 0)
+        glTexImage2D( GL.GL_TEXTURE_2D, 0, GL.GL_RGB,
+                      256, #multiImage.size()[0],
+                      256, #multiImage.size()[1],
+                      0,
+                      GL.GL_RGB, GL.GL_UNSIGNED_BYTE, textureData)
+        glTexParameterf(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER,
+                        GL.GL_LINEAR)
+        glTexParameterf(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER,
+                        GL.GL_LINEAR)
+
+        glPushMatrix()
+        if 1:
+            pos = num.array(self.center)
+            pos[2] += self.z
+            if self.zoom:
+                full = [eyeX, horizonY, 6.3]
+                pos = lerp(pos, full, self.zoom)
+            glTranslatef(*pos)
+
+            # card facing +Z from -1<x<1 -1<y<1
+            glCallList(cardList)
+        glPopMatrix()
+
+    def __repr__(self):
+        return "Card(%r, %r)" % (self.thumbImage, self.center)
+
 
 cards = AllCards()
 
@@ -184,15 +204,8 @@ class Scene(object):
             glDisable(GL.GL_LIGHTING)
 
             for card in cards:
-                glPushMatrix()
-                pos = num.array(card.center)
-                pos[2] += card.z
-                if card.zoom:
-                    full = [self.eyeX, horizonY, 6.3]
-                    pos = lerp(pos, full, card.zoom)
-                glTranslatef(*pos)
-                imageCard(card.filename)
-                glPopMatrix()
+                card.draw(self.eyeX, horizonY)
+                
 
             glEnable(GL.GL_LIGHTING)
 
@@ -215,7 +228,6 @@ surf = pygame.display.set_mode((800, 600),
 scene = Scene()
 openglSetup()
 
-
 goalXSpeed = 7 / 50 # units / sec per pixel
 eyeCatchUp = 3 # du / sec. lower = more tilting
 rampUp = .5 # sec to get to full speed
@@ -228,11 +240,8 @@ class MainLoop(object):
         self.goalX = 0 # wall center goal
         self.decel = 1 # 1..0 during decelleration
         self.lastUpdate = time.time()
-        while 1:
-            try:
-                self.update()
-            except KeyboardInterrupt:
-                break
+
+        reactor.callLater(0, self.update)
             
     def update(self):
         t = time.time()
@@ -246,6 +255,7 @@ class MainLoop(object):
             self.onEvent(event, dt)
         self.step(dt)
         scene.draw()
+        reactor.callLater(0, self.update)
 
     def step(self, dt):
         if self.buttons is None and self.decel > 0:
@@ -269,11 +279,11 @@ class MainLoop(object):
 
     def onEvent(self, event, dt):
         if event.type is pygame.QUIT:
-            sys.exit(0)
+            reactor.stop()
 
         if event.type is pygame.KEYDOWN:
-          if event.key is pygame.K_ESCAPE:
-            sys.exit(0)
+            if event.key is pygame.K_ESCAPE:
+                reactor.stop()
 
         if event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:
@@ -311,4 +321,5 @@ class MainLoop(object):
                                      0)
         return [wx, wy, 0]
 
-MainLoop()
+ml = MainLoop()
+reactor.run()
