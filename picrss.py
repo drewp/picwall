@@ -8,13 +8,18 @@ from RSS import CollectionChannel
 from twisted.web.client import getPage
 from twisted.internet.defer import Deferred, succeed
 from twisted.internet import reactor
-import os, re, sys, random
+import os, re, sys, random, md5
 from PIL import Image
 from StringIO import StringIO
 
 def localLoad(url, delaySecs=0):
     """deferred to file.read, with optional delay to simulate a load time"""
-    contents = open(url[len("file://"):]).read()
+    try:
+        contents = open(url[len("file://"):]).read()
+    except IOError, e:
+        d = Deferred()
+        d.errback(e)
+        return d
     if not delaySecs:
         return succeed(contents)
     d = Deferred()
@@ -45,7 +50,7 @@ class ThumbImage(object):
         return d
 
     def getData(self, size='thumb'):
-        """returns data or None if data isn't loaded yet"""
+        """returns (size,data) or None if data isn't loaded yet"""
         ret = self.data.get(size, None)
         if isinstance(ret, Deferred):
             # this test makes a race condition between the two
@@ -60,19 +65,35 @@ class ThumbImage(object):
         return ret
 
     def _decompress(self, jpgData):
-        """get the RGB data from the results of the URL.
+        """get the size and RGB data from the results of the URL.
 
         (to support multiple img types, this will probably have to
         know more about the content-type from the page fetch)
         """
         f = StringIO(jpgData)
-        return Image.open(f).resize((256, 256)).tostring()
+        img = Image.open(f)
+        #img = img.resize((256, 256))
+
+        # if the image has an EXIF rotation, the thumb will be
+        # straightened but the image won't be. That should be fixed here.
+        
+        return img.size, img.tostring()
+
+
+def gnomeThumbnailPath(url):
+    # what if the thumb isn't there yet? it should be created on
+    # demand with getData(), but it might also be ok to call the
+    # thumbnailer program in here. I don't know what the general
+    # make-thumbnail program or lib is called.
+    return "file://%s/.thumbnails/normal/%s.png" % (
+        os.path.expanduser("~"),
+        md5.new(url).hexdigest())
 
 def localDir(root):
     for fn in os.listdir(root):
         filename = os.path.abspath(os.path.join(root, fn))
-        img = ThumbImage("file://%s" % filename, # should be in .thumbnails
-                         "file://%s" % filename)
+        uri = "file://%s" % filename
+        img = ThumbImage(gnomeThumbnailPath(uri), uri)
         yield img
 
 def flickrImages(rssUrl="file:///home/drewp/projects/picwall/jimmm-sample.rss"):

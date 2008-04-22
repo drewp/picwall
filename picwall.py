@@ -6,7 +6,7 @@ from OpenGL.GL import glEnable, glEndList, glTranslatef, glColor3f
 from OpenGL.GL import glClear, glLoadIdentity, glViewport,glCallList
 from OpenGL.GL import glTexCoord2f,glVertex3f,glFrustum,glMatrixMode
 from OpenGL.GL import glFlush,glBindTexture,glTexImage2D,glTexParameterf
-import pygame, time
+import pygame, time, sys
 from twisted.internet import reactor
 import picrss
 from glsyntax import pushMatrix, mode, begin
@@ -48,16 +48,17 @@ class AllCards(object):
     holds the ImageCards objs you can currently see on the wall, plus
     the current zoom/hover
     """
-    def __init__(self):
+    def __init__(self, images):
+        """images is an iterable of ThumbImage objs"""
         self.cards = []
         self.currentZoom = None
         self.currentRaise = None
 
         #root = "/home/drewp/pic/digicam/dl-2008-04-19"
-        root = "specnature-thumbs"
+
 #        pics = [os.path.join(root, f)
 #                for f in os.listdir(root) if f.lower().endswith('.jpg')]
-        pics = list(picrss.localDir(root))
+        pics = list(images)
 
         for x in range(12):
             for y in range(3):
@@ -139,19 +140,24 @@ class ImageCard(object):
                     # once opacity is fadable, and it's at 1, then we
                     # can remove the thumb layer from the list.
 
-            for size, opacity, textureData in layers:
-                if textureData is None:
+                    layers.reverse() # fix opengl draw order so hires is on top
+
+                    
+
+            for size, opacity, imgData in layers:
+                if imgData is None:
                     # need to unset tx here!
                     glCallList(cardList)
                     # or draw a blank border, maybe some load status
                     # indication
                 else:
+                    (w,h), textureData = imgData
                     glBindTexture(GL.GL_TEXTURE_2D, 0)
-                    glTexImage2D( GL.GL_TEXTURE_2D, 0, GL.GL_RGB,
-                                  256, #multiImage.size()[0],
-                                  256, #multiImage.size()[1],
-                                  0,
-                                  GL.GL_RGB, GL.GL_UNSIGNED_BYTE, textureData)
+                    glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGB,
+                                 w,
+                                 h,
+                                 0,
+                                 GL.GL_RGB, GL.GL_UNSIGNED_BYTE, textureData)
                     glTexParameterf(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER,
                                     GL.GL_LINEAR)
                     glTexParameterf(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER,
@@ -338,7 +344,7 @@ def main():
                                    #pygame.FULLSCREEN | 
                                    pygame.DOUBLEBUF |
                                    0)
-    cards = AllCards()
+    cards = AllCards(picrss.localDir(sys.argv[1]))
     scene = Scene(surf, cards)
     scene.openglSetup()
 
