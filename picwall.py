@@ -1,4 +1,5 @@
 from __future__ import division, with_statement
+import pygame, time, sys
 import Numeric as num
 from OpenGL import GLU, GL
 from OpenGL.GL import glClearColor,glNewList,glGenLists,glScalef
@@ -6,11 +7,11 @@ from OpenGL.GL import glEnable, glEndList, glTranslatef, glColor3f
 from OpenGL.GL import glClear, glLoadIdentity, glViewport,glCallList
 from OpenGL.GL import glTexCoord2f,glVertex3f,glFrustum,glMatrixMode
 from OpenGL.GL import glFlush,glBindTexture,glTexImage2D,glTexParameterf
-import pygame, time, sys
 from twisted.internet import reactor
 import picrss
 from glsyntax import pushMatrix, mode, begin
 from algo import dist, lerp
+
 
 class AnimParam:
     cardZSlide = .1 # sec, roughly
@@ -54,18 +55,16 @@ class AllCards(object):
         self.currentZoom = None
         self.currentRaise = None
 
-        #root = "/home/drewp/pic/digicam/dl-2008-04-19"
-
-#        pics = [os.path.join(root, f)
-#                for f in os.listdir(root) if f.lower().endswith('.jpg')]
-        pics = list(images)
-
-        for x in range(12):
-            for y in range(3):
-                self.cards.append(ImageCard(pics[(x * 3 + y) % len(pics)],
-                                       (x * 2.2 + .5,
-                                        y * 2.2 - .6 + .5,
-                                        0)))
+        x = y = 0
+        for img in images:
+            center = (x * 2.2 + .5,
+                      y * 2.2 - .6 + .5,
+                      0)
+            self.cards.append(ImageCard(img, center))
+            y = y + 1
+            if y > 2:
+                y = 0
+                x = x + 1
 
     def wallWidth(self):
         return 12 * 2.2
@@ -111,7 +110,10 @@ class ImageCard(object):
     """the visible card object"""
     def __init__(self, thumbImage, center):
         """center is the 3d position of the normal center of this card
-        (when it isn't zoomed)"""
+        (when it isn't zoomed)
+
+        thumbImage is a picrss.ThumbImage
+        """
         self.center = center
         self.thumbImage = thumbImage
         self.z = Pt(0)
