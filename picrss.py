@@ -4,7 +4,7 @@ todo:
 
  
 """
-from RSS import CollectionChannel
+import feedparser
 from twisted.web.client import getPage
 from twisted.internet.defer import Deferred, succeed
 from twisted.internet import reactor
@@ -98,19 +98,19 @@ def localDir(root):
 
 def flickrImages(rssUrl="file:///home/drewp/projects/picwall/jimmm-sample.rss"):
     """yield ThumbImage objs from a flickr rss feed"""
-    
-    chan = CollectionChannel()
-    chan.parse()
-    # python -c "from xml.sax.sax2exts import XMLParserFactory as X; print X.get_parser_list()"
-    #['xml.sax.drivers2.drv_pyexpat', 'xml.sax.drivers2.drv_xmlproc']
 
-    for i in chan.listItems():
-        item = chan.getItem(i)
-        desc = item[('http://purl.org/rss/1.0/', u'description')]
-        m = re.search(r"(http://.*_m.jpg)", desc)
-        yield ThumbImage(m.groups(1),
-                         m.groups(1) # should be the bigger version
-                         )
+    feed = feedparser.parse(rssUrl)
+    for item in feed.entries:
+        # neither feedparser nor RSS.py gives me the url attribute on
+        # the media:thumbnail tag!
+
+        # here's a version for photo.bigasterisk.com, at least. fails for flickr
+        yield ThumbImage(item.link.replace('=screen', '=thumb').encode('utf-8'),
+                         item.link.encode('utf-8'))
+
+
+#print list(flickrImages())
+
 
 # flickr result rss. _m is ok for thumb size. roughly 20k, width=240
 {

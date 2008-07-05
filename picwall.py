@@ -344,7 +344,13 @@ def main():
                                    #pygame.FULLSCREEN | 
                                    pygame.DOUBLEBUF |
                                    0)
-    cards = AllCards(picrss.localDir(sys.argv[1]))
+    arg = sys.argv[1]
+    print repr(arg)
+    if arg.startswith(('http:', 'file:')):
+        imgs = picrss.flickrImages(sys.argv[1])
+    else:
+        imgs = picrss.localDir(sys.argv[1])
+    cards = AllCards(imgs)
     scene = Scene(surf, cards)
     scene.openglSetup()
 
