@@ -72,7 +72,10 @@ class ThumbImage(object):
         """
         f = StringIO(jpgData)
         img = Image.open(f)
-        #img = img.resize((256, 256))
+
+        # thumbs are corrupting in opengl, not sure why
+        if img.size == (75, 56):
+            img = img.resize((128, 128))
 
         # if the image has an EXIF rotation, the thumb will be
         # straightened but the image won't be. That should be fixed here.
